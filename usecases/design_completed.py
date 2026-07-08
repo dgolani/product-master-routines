@@ -1,28 +1,30 @@
 """Use case: design-completed.
 
-When an Ounass Product Design (OPD) ticket reaches Done, alert the Slack channel mapped
-to the ticket's POD — once per ticket.
+When an Ounass Product Design (OPD) ticket reaches Done, print a single Slack message
+listing the newly-completed tickets — once per ticket. The routine posts that message to
+one channel it names in its prompt (slot-watch style: stdout is the message).
 
-The script owns all business logic (the JQL, the field list, dedup, routing, formatting).
-Claude only runs the query the script emits and posts the blocks it prints. Two subcommands:
+The script owns all business logic (the JQL, the field list, dedup, formatting). Claude
+only runs the query the script emits and posts the message it prints. Two subcommands:
 
     query    -> prints {"jql": ..., "fields": [...]} for Claude to run via jira-rest
-    render   -> reads the JQL result rows on stdin, prints channel-tagged blocks,
-                records the emitted keys as sent
+    render   -> reads the JQL result rows on stdin, prints the Slack message,
+                records the emitted keys as sent (empty output = nothing new)
 
 Field mapping (verified against OPD-3):
-    summary                     -> summary
-    designer                    -> customfield_12707  (Product Owner)
-    pod (routing)               -> customfield_13434  (Pod)
-    figma link(s)               -> customfield_12714  (Design)
-    completed_on                -> customfield_13239  (Actual Design/Research Finish Date),
-                                   falling back to statuscategorychangedate (went Done)
+    summary       -> summary
+    designer      -> customfield_12707  (Product Owner)
+    figma link(s) -> customfield_12714  (Design)
+    completed_on  -> customfield_13239  (Actual Design/Research Finish Date),
+                     falling back to statuscategorychangedate (went Done)
+
+Output uses standard markdown ([label](url), **bold**) — the format the Slack connector
+renders. Slack's native <url|label> would post literally.
 """
 import json
-from collections import OrderedDict
 from datetime import datetime
 
-from core import protocol, gitstate
+from core import gitstate
 
 PROJECT = "OPD"
 RECENCY_DAYS = 7
@@ -31,12 +33,11 @@ STATE_PATH = "state/design_completed.json"
 
 F_SUMMARY = "summary"
 F_DESIGNER = "customfield_12707"
-F_POD = "customfield_13434"
 F_FIGMA = "customfield_12714"
 F_DESIGN_FINISH = "customfield_13239"
 F_DONE_TS = "statuscategorychangedate"
 
-QUERY_FIELDS = [F_SUMMARY, F_DESIGNER, F_POD, F_FIGMA, F_DESIGN_FINISH, F_DONE_TS]
+QUERY_FIELDS = [F_SUMMARY, F_DESIGNER, F_FIGMA, F_DESIGN_FINISH, F_DONE_TS]
 
 
 def build_query():
@@ -57,40 +58,28 @@ def _fmt_date(value):
 
 
 def extract_ticket(issue):
-    """Normalise a raw jira-rest issue into the fields we display + route on."""
+    """Normalise a raw jira-rest issue into the fields we display."""
     f = issue.get("fields", {}) or {}
-
     owners = f.get(F_DESIGNER) or []
     designer = ", ".join(o.get("displayName", "") for o in owners if o.get("displayName"))
-
-    pods = f.get(F_POD) or []
-    pod = pods[0] if pods else None
-
     figma = [(d.get("displayName") or d.get("url"), d.get("url"))
              for d in (f.get(F_FIGMA) or []) if d.get("url")]
-
     completed_on = _fmt_date(f.get(F_DESIGN_FINISH)) or _fmt_date(f.get(F_DONE_TS))
-
     return {
         "key": issue.get("key"),
         "summary": f.get(F_SUMMARY) or "",
         "designer": designer,
-        "pod": pod,
         "figma": figma,
         "completed_on": completed_on,
     }
 
 
 def _md_link(url, label):
-    """Standard-markdown link — the format the Slack connector expects (it converts
-    [label](url) into a Slack hyperlink). Slack's native <url|label> would post literally."""
     return "[%s](%s)" % (label, url)
 
 
 def _ticket_lines(t):
-    """One ticket -> a list of standard-markdown lines."""
-    key = t["key"]
-    lines = ["• %s — %s" % (_md_link(BROWSE % key, key), t["summary"])]
+    lines = ["• %s — %s" % (_md_link(BROWSE % t["key"], t["key"]), t["summary"])]
     meta = []
     if t["designer"]:
         meta.append("👤 %s" % t["designer"])
@@ -105,33 +94,21 @@ def _ticket_lines(t):
     return lines
 
 
-def format_body(pod, tickets):
-    """Render a channel's block body: a POD header + each ticket."""
-    header = "🎨 **Design completed** — %s" % (pod if pod else "_no POD set_")
-    lines = [header]
+def format_message(tickets):
+    """Render all tickets into one Slack message body."""
+    lines = ["🎨 **Design completed**"]
     for t in tickets:
         lines.extend(_ticket_lines(t))
     return "\n".join(lines)
 
 
-def channel_for(pod, pod_channels, fallback):
-    return pod_channels.get(pod, fallback) if pod else fallback
-
-
-def render(issues, sent_keys, pod_channels, fallback):
-    """Filter already-sent tickets, group new ones by POD, and return
-    (channel-tagged output string, list of newly-emitted keys)."""
+def render(issues, sent_keys):
+    """Filter already-sent tickets and return (message string, newly-emitted keys).
+    Empty message when there is nothing new."""
     new = [extract_ticket(i) for i in issues if i.get("key") not in sent_keys]
-
-    by_pod = OrderedDict()
-    for t in new:
-        by_pod.setdefault(t["pod"], []).append(t)
-
-    blocks = [(channel_for(pod, pod_channels, fallback), format_body(pod, tickets))
-              for pod, tickets in by_pod.items()]
-
-    new_keys = [t["key"] for t in new]
-    return protocol.render_blocks(blocks), new_keys
+    if not new:
+        return "", []
+    return format_message(new), [t["key"] for t in new]
 
 
 def select_output(out, new_keys, is_first_run):
@@ -155,25 +132,18 @@ def coerce_issues(payload):
     return []
 
 
-def run(sub, stdin_text="", state_path=STATE_PATH, pod_channels=None, fallback=None):
+def run(sub, stdin_text="", state_path=STATE_PATH):
     """Entry point invoked by pm.py. `sub` is 'query' or 'render'. Returns the string to
     print (empty string = print nothing)."""
     if sub == "query":
         return json.dumps(build_query(), indent=2)
 
     if sub == "render":
-        if pod_channels is None or fallback is None:
-            import config
-            pod_channels = config.POD_CHANNELS if pod_channels is None else pod_channels
-            fallback = config.FALLBACK_CHANNEL if fallback is None else fallback
-
         issues = coerce_issues(json.loads(stdin_text)) if stdin_text.strip() else []
         first_run = not gitstate.state_exists(state_path)
         sent = gitstate.load_sent(state_path)
-
-        out, new_keys = render(issues, sent, pod_channels, fallback)
+        out, new_keys = render(issues, sent)
         final_out, record = select_output(out, new_keys, first_run)
-
         if record:
             gitstate.save_sent(state_path, sent | set(record),
                                "chore(design-completed): record %d sent" % len(record))

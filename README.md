@@ -12,20 +12,19 @@ Modeled on the `ounass_slots.py` slot-watch routine: mode dispatch, git-committe
 A routine runs `pm.py` as a subprocess. That subprocess **cannot** call Claude's MCP
 connectors and has no injected credentials. So:
 
-- **The script owns all business logic** — the query, the field list, dedup, routing, formatting.
+- **The script owns all business logic** — the query, the field list, dedup, formatting.
 - **Claude does only the I/O the subprocess can't reach** — run the query the script emits
-  (via a connector) and post the blocks it prints (to Slack).
+  (via a connector) and post the message it prints (to Slack).
 
-The routine prompt contains no logic, no query, no channel IDs.
+The routine prompt contains no logic and no query — just which connector to run and which
+channel to post to.
 
 ## Layout
 
 ```
 pm.py                       # entry point + dispatcher (USE_CASES registry)
 usecases/design_completed.py# use case #1
-core/protocol.py            # channel-tagged block format (shared)
 core/gitstate.py            # git-committed state (shared)
-config.py                   # POD -> Slack channel map + fallback
 state/design_completed.json # created on first run (git-committed dedup)
 tests/                      # unittest (stdlib, no pip installs)
 docs/specs/                 # design spec
@@ -39,33 +38,33 @@ docs/specs/                 # design spec
 
 ## Use case: `design-completed`
 
-Alerts a Slack channel (mapped by the ticket's POD) when an OPD design ticket reaches Done —
-once per ticket.
+Prints one Slack message listing OPD design tickets that have reached Done — once per ticket.
+The routine posts that message to a single channel it names in its prompt.
 
 ```
 python3 pm.py design-completed query    # prints {"jql", "fields"} to run via jira-rest
-python3 pm.py design-completed render     # reads JQL rows (JSON) on stdin, prints
-                                         # channel-tagged Slack blocks, records sent keys
+python3 pm.py design-completed render     # reads JQL rows (JSON) on stdin, prints the
+                                         # Slack message, records sent keys
 ```
 
 - **Dedup:** `state/design_completed.json` (git-committed), fail-open. At most one alert per key.
 - **Cold-start:** first run with no state file records all current keys silently (no backlog blast).
-- **Routing:** `config.py` maps POD -> Slack channel; unmapped/blank POD -> `FALLBACK_CHANNEL`
-  (currently Dinesh's DM `D04LBFPJEMT` during the test phase). Every value is a plain Slack
-  target the prompt posts to directly — no special-casing.
+- **Fields:** summary · designer (Product Owner) · completed-on · Figma link(s), rendered as
+  standard-markdown links (the format the Slack connector expects).
 
 ### Routine setup
 
 - **Repo:** this repo. **Connectors:** jira-rest (or jiraanalysis) + Slack. **Schedule:** e.g. hourly.
-- **Prompt:**
+- **Prompt** (replace `<CHANNEL>` with your channel name/id or a person):
 
 ```
-1. Run from repo root: python3 pm.py design-completed query
-   Parse stdout as JSON {jql, fields}. Run that JQL via the jira connector, requesting those fields.
-2. Pipe the resulting issues as JSON into: python3 pm.py design-completed render
-3. The script prints zero or more blocks. Each block starts with a line "==channel=<target>=="
-   followed by a body. For each block, post the body text VERBATIM to the Slack channel
-   identified by <target> (a channel id, channel name, or DM id). If there are no blocks, do nothing.
+1. From the repo root, run: python3 pm.py design-completed query
+   Parse stdout as JSON { "jql", "fields" }. Run that JQL via the jira-rest connector,
+   requesting exactly those fields.
+2. Pipe the resulting issues as JSON into stdin of:
+   python3 pm.py design-completed render
+3. If the script prints anything, post it VERBATIM (do not reformat) to <CHANNEL>.
+   If it prints nothing, do nothing.
 ```
 
 ## Tests

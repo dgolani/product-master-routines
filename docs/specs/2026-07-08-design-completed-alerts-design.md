@@ -52,9 +52,7 @@ product-master-routines/
   usecases/
     design_completed.py          # use case #1 (self-contained)
   core/
-    gitstate.py                  # _repo_read/_repo_write/_should_send lifted from ounass_slots.py
-    protocol.py                  # channel-tagged block format (shared by all use cases)
-  config.py                      # POD → channel map + fallback channel
+    gitstate.py                  # git-committed state lifted from ounass_slots.py
   state/
     design_completed.json        # git-committed "already sent" keys
   docs/specs/                     # this spec
@@ -77,18 +75,20 @@ python3 pm.py design-completed query
 
 python3 pm.py design-completed render         # ← JQL result rows as JSON on stdin
     → drops any ticket key already in state/design_completed.json
-    → for each remaining ticket: resolve POD → channel (unmapped/blank → fallback)
-    → group by channel, format one channel-tagged block per channel
+    → formats the remaining tickets into ONE Slack message
     → records the emitted keys as sent (git commit + push; fail-open like should_send_alert)
-    → prints the blocks (empty output = nothing new)
+    → prints the message (empty output = nothing new)
 ```
+
+Routing note: there is **no POD→channel mapping**. All alerts go to a single channel that
+the routine names in its prompt (slot-watch style). stdout is the whole message.
 
 ### `query` output (JQL, not SQL)
 
 ```json
 {
   "jql": "project = OPD AND status = Done AND statusCategoryChangedDate >= -7d ORDER BY statusCategoryChangedDate DESC",
-  "fields": ["summary", "customfield_12707", "customfield_13434",
+  "fields": ["summary", "customfield_12707",
              "customfield_12714", "customfield_13239", "statuscategorychangedate"]
 }
 ```
@@ -98,14 +98,12 @@ python3 pm.py design-completed render         # ← JQL result rows as JSON on s
 
 ### `render` output (channel-tagged blocks)
 
-Claude reads the `==channel=...==` header and posts the body below it verbatim.
-
-Bodies use **standard markdown** (`[label](url)`, `**bold**`) — the format the Slack
-connector renders; Slack's native `<url|label>` would post literally.
+The whole stdout IS the message; the routine posts it verbatim to one channel. Uses
+**standard markdown** (`[label](url)`, `**bold**`) — the format the Slack connector
+renders; Slack's native `<url|label>` would post literally.
 
 ```
-==channel=D04LBFPJEMT==
-🎨 **Design completed** — pod_vm
+🎨 **Design completed**
 • [OPD-3](https://altayerdigital.atlassian.net/browse/OPD-3) — Search-Integrated Dynamic Edit Pages
    👤 Dawid Tomczyk · 📅 07 Jul 2026
    🔗 [VM platform - Phase 4 - Automated edit pages](https://www.figma.com/file/ZMG8YzYW96PCzvwZSZHoMp?node-id=4185%3A18730)
@@ -120,7 +118,6 @@ connector renders; Slack's native `<url|label>` would post literally.
 | Summary | `summary` | |
 | Figma link(s) | `customfield_12714` ("Design") | Array of `{displayName, url}`; render all links |
 | Designer | `customfield_12707` ("Product Owner") | Array of users; join display names |
-| POD (routing key) | `customfield_13434` ("Pod") | Array; take first value (e.g. `pod_vm`) |
 | Completed-on | `customfield_13239` ("Actual Design/Research Finish Date") | If null → fall back to `statuscategorychangedate` (when it entered Done) |
 | Ticket key | issue `key` | Dedup key + `browse/` link |
 
@@ -141,35 +138,23 @@ project **OPD** = "Ounass Product Design" (id 13168).
 
 ---
 
-## 7. Routing config (`config.py`)
+## 7. Routing
 
-```python
-# POD (from customfield_13434) → Slack channel (id or name).
-POD_CHANNELS = {
-    # "pod_vm": "C0XXXX",
-    # "pod_search": "#design-search",
-}
-# Unmapped or blank POD goes here. Test phase: Dinesh's DM.
-FALLBACK_CHANNEL = "D04LBFPJEMT"
-```
-
-Every value is a plain Slack target the prompt posts to directly (channel id, channel name, or
-DM id) — no special-casing. **Test phase:** `POD_CHANNELS` is empty, so every alert routes to
-`FALLBACK_CHANNEL` (Dinesh's DM). In production, fill `POD_CHANNELS` and repoint `FALLBACK_CHANNEL`
-at a real channel — no other change needed.
+No routing config. All alerts go to a **single channel** named in the routine prompt
+(slot-watch style). To change the destination, edit the prompt — not the code.
 
 ---
 
 ## 8. Routine prompt (the entire prompt — direction + comms only)
 
+Replace `<CHANNEL>` with the target channel name/id (or a person).
+
 ```
-1. Run from repo root: python3 pm.py design-completed query
-   Parse its stdout as JSON: { jql, fields }. Run that JQL via the jira connector,
+1. From the repo root, run: python3 pm.py design-completed query
+   Parse stdout as JSON { jql, fields }. Run that JQL via the jira-rest connector,
    requesting exactly those fields.
-2. Pipe the resulting issues as JSON into: python3 pm.py design-completed render
-3. The script prints zero or more blocks. Each block starts with a line "==channel=<target>=="
-   followed by a body. For each block, post the body text VERBATIM to the Slack channel
-   identified by <target> (a channel id, channel name, or DM id). If there are no blocks, do nothing.
+2. Pipe the resulting issues as JSON into stdin of: python3 pm.py design-completed render
+3. If the script prints anything, post it VERBATIM to <CHANNEL>. If it prints nothing, do nothing.
 ```
 
 Schedule: TBD (e.g. hourly, like slot-watch). Connectors granted to the routine: **jira-rest**
