@@ -85,41 +85,40 @@ class TestExtractTicket(unittest.TestCase):
 
 
 class TestFormatBlock(unittest.TestCase):
-    def test_block_has_markers_summary_slot_and_material(self):
+    def test_brief_has_style_facts_material_sections(self):
         block = dc.format_block(dc.extract_ticket(make_issue()))
-        self.assertIn("===MESSAGE===", block)
-        self.assertIn("{{SUMMARY}}", block)
-        self.assertIn("===MATERIAL", block)
+        self.assertIn("===EPIC OPD-3===", block)
+        self.assertIn("STYLE", block)
+        self.assertIn("FACTS", block)
+        self.assertIn("MATERIAL", block)
         self.assertIn("===END===", block)
 
-    def test_postable_part_has_fields_and_product_epic_link(self):
+    def test_facts_carry_exact_names_dates_links(self):
         block = dc.format_block(dc.extract_ticket(make_issue()))
-        postable = block.split("===MATERIAL")[0]
-        self.assertIn("[OPD-3](https://altayerdigital.atlassian.net/browse/OPD-3)", postable)
-        self.assertIn("Dawid Tomczyk", postable)
-        self.assertIn("07 Jul 2026", postable)
-        self.assertIn("[VM platform - Phase 4 - Automated edit pages]"
-                      "(https://www.figma.com/file/ZMG8YzYW96PCzvwZSZHoMp?node-id=4185%3A18730)", postable)
-        self.assertIn("[VM-527](https://altayerdigital.atlassian.net/browse/VM-527)", postable)
+        facts = block.split("MATERIAL")[0]
+        self.assertIn("Search-Integrated Dynamic Edit Pages", facts)
+        self.assertIn("https://altayerdigital.atlassian.net/browse/OPD-3", facts)
+        self.assertIn("Dawid Tomczyk", facts)
+        self.assertIn("07 Jul 2026", facts)
+        self.assertIn("https://www.figma.com/file/ZMG8YzYW96PCzvwZSZHoMp?node-id=4185%3A18730", facts)
+        self.assertIn("https://altayerdigital.atlassian.net/browse/VM-527", facts)
 
     def test_material_has_description_and_linked_epic(self):
-        block = dc.format_block(dc.extract_ticket(make_issue()))
-        material = block.split("===MATERIAL")[1]
+        material = dc.format_block(dc.extract_ticket(make_issue())).split("MATERIAL")[1]
         self.assertIn("trend edit pages", material)
         self.assertIn("VM-527", material)
 
-    def test_no_product_epic_omits_link_and_notes_absence(self):
+    def test_no_product_epic_notes_absence(self):
         block = dc.format_block(dc.extract_ticket(make_issue(fields={"issuelinks": None})))
-        postable = block.split("===MATERIAL")[0]
-        self.assertNotIn("Feature epic:", postable)
-        self.assertIn("none", block.split("===MATERIAL")[1].lower())
+        facts = block.split("MATERIAL")[0]
+        self.assertNotIn("browse/VM-527", facts)
+        self.assertIn("none", facts.lower())
 
 
 class TestRender(unittest.TestCase):
-    def test_new_ticket_emits_block_and_reports_key(self):
+    def test_new_ticket_emits_brief_and_reports_key(self):
         out, new_keys = dc.render([make_issue()], set())
-        self.assertIn("OPD-3", out)
-        self.assertIn("===MESSAGE===", out)
+        self.assertIn("===EPIC OPD-3===", out)
         self.assertEqual(new_keys, ["OPD-3"])
 
     def test_already_sent_ticket_is_skipped(self):
@@ -127,9 +126,9 @@ class TestRender(unittest.TestCase):
         self.assertEqual(out, "")
         self.assertEqual(new_keys, [])
 
-    def test_two_new_epics_two_blocks(self):
+    def test_two_new_epics_two_briefs(self):
         out, new_keys = dc.render([make_issue(key="OPD-3"), make_issue(key="OPD-9")], set())
-        self.assertEqual(out.count("===MESSAGE==="), 2)
+        self.assertEqual(out.count("===EPIC "), 2)
         self.assertEqual(new_keys, ["OPD-3", "OPD-9"])
 
 

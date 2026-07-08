@@ -48,22 +48,24 @@ python3 pm.py design-completed render     # reads JQL rows (JSON) on stdin, prin
                                          # per new epic, records sent keys
 ```
 
-`render` prints, per new epic, a block the routine fills and posts:
+`render` prints, per new epic, a **brief** — style + exact facts + summary material — that
+Claude turns into a human-voice Slack message:
 
 ```
-===MESSAGE===
-<postable message, with a {{SUMMARY}} slot>
-===MATERIAL (do not post)===
-<design epic description + linked product epic, for writing the summary>
+===EPIC OPD-3===
+STYLE: casual teammate update, light emoji, inline links, 2-3 sentence summary…
+SHAPE (match the tone, write your own words): 🎉 Design's wrapped on **[<title>](…)** …
+FACTS (use exactly): title / design ticket url / designer / completed / figma / product epic
+SUMMARY MATERIAL (open the product epic / its Confluence page if thin): <description> …
 ===END===
 ```
 
 - **Dedup:** `state/design_completed.json` (git-committed), fail-open. At most one alert per key.
 - **Cold-start:** first run with no state file records all current keys silently (no backlog blast).
-- **Fields (script-owned, fixed):** summary · designer (Product Owner) · completed-on ·
-  Figma link(s) · linked product epic (when present). Standard-markdown links.
-- **Summary (Claude-written):** 3-4 lines from the design epic description + the linked product
-  epic; Claude may open the epic / its Confluence page when the text is thin.
+- **Facts (script-owned, exact):** title · design-ticket link · designer (Product Owner) ·
+  completed-on · Figma link(s) · linked product epic (when present).
+- **Message (Claude-written):** a casual, human 2-3 sentence write-up in the house style, using
+  the facts verbatim; Claude may open the product epic / its Confluence page for the summary.
 
 ### Routine setup
 
@@ -77,15 +79,13 @@ python3 pm.py design-completed render     # reads JQL rows (JSON) on stdin, prin
    requesting exactly those fields.
 2. Pipe the resulting issues as JSON into stdin of:
    python3 pm.py design-completed render
-3. The script prints zero or more blocks, each between "===MESSAGE===" and "===END===".
-   For each block:
-     a. Read the MATERIAL section and write a 3-4 line summary of what the feature is about.
-        If a product epic is linked, you may open it (and any Confluence page it references)
-        to get the real description.
-     b. Replace {{SUMMARY}} in the message with your summary.
-     c. Post the lines between "===MESSAGE===" and the "===MATERIAL" line VERBATIM to <CHANNEL>.
-        Do NOT post the MATERIAL section.
-   If there are no blocks, do nothing.
+3. The script prints zero or more briefs, each between "===EPIC …===" and "===END===".
+   For each brief, write ONE Slack message and post it to <CHANNEL>:
+     - Follow the STYLE and SHAPE (casual, human — your own words, not a template).
+     - Use the FACTS exactly (never change names, dates, or links).
+     - Write the 2-3 sentence summary yourself from the SUMMARY MATERIAL; if a product epic
+       is linked, you may open it (and any Confluence page it references) for the real detail.
+   Post only your composed message — never the brief itself. If there are no briefs, do nothing.
 ```
 
 ## Tests

@@ -98,25 +98,41 @@ writes only the 3-4 line summary and posts.
 - **7-day recency guard** bounds the working set.
 - Field list is owned by the script, so the prompt never names a field id.
 
-### `render` output (one block per new epic)
+### `render` output (one brief per new epic)
 
-Standard markdown (`[label](url)`, `**bold**`) — the Slack connector's format. Claude fills
-`{{SUMMARY}}` and posts the lines above `===MATERIAL` only.
+Each brief gives Claude the house STYLE, an example SHAPE, the exact FACTS, and the SUMMARY
+MATERIAL. Claude writes a human-voice message (casual teammate update, chosen style A) using
+the facts verbatim and posts it — the brief itself is never posted.
 
 ```
-===MESSAGE===
-🎨 **Design completed**
-• [OPD-3](https://altayerdigital.atlassian.net/browse/OPD-3) — Search-Integrated Dynamic Edit Pages
-   👤 Dawid Tomczyk · 📅 07 Jul 2026
-   🔗 [VM platform - Phase 4 - Automated edit pages](https://www.figma.com/file/ZMG8YzYW96PCzvwZSZHoMp?node-id=4185%3A18730)
-   📋 Feature epic: [VM-527](https://altayerdigital.atlassian.net/browse/VM-527)
-   📝 {{SUMMARY}}
-===MATERIAL (do not post — use it to write {{SUMMARY}})===
+===EPIC OPD-3===
+STYLE: Casual teammate Slack update — sound like a real person, light emoji, inline links,
+       2-3 sentence plain-language summary. Drop the build/epic clause if there is no product epic.
+SHAPE (match the tone, write your own words):
+🎉 Design's wrapped on **[<title>](<design ticket url>)** — <designer> finished it on <date>.
+<2-3 sentences: what the feature is and why it matters>
+Designs are in [Figma](<figma url>), build's tracked in [<epic>](<epic url>).
+
+FACTS (use exactly; never change names, dates, or links):
+- title: Search-Integrated Dynamic Edit Pages
+- design ticket url: https://altayerdigital.atlassian.net/browse/OPD-3
+- designer: Dawid Tomczyk
+- completed: 07 Jul 2026
+- figma: VM platform - Phase 4 - Automated edit pages | https://www.figma.com/file/ZMG8Yz…
+- product epic: VM-527 | https://altayerdigital.atlassian.net/browse/VM-527
+
+SUMMARY MATERIAL (open the product epic / its Confluence page if thin):
 Design epic description: New feature will allow merchandisers to create trend edit pages…
 Linked product epic(s):
 - VM-527: [pod_vm] Search-Integrated Dynamic Edit Pages
 ===END===
 ```
+
+Example composed message (what Claude posts):
+
+> 🎉 Design's wrapped on **[Search-Integrated Dynamic Edit Pages](…/OPD-3)** — Dawid Tomczyk finished it on 7 Jul.
+> Merchandisers can now spin up trend edit pages straight from a search query, with ranking that matches the main platform. Each page regenerates on demand from a single rule and has a manual refresh, so it never goes stale — and it takes per-page curation down to almost nothing.
+> Designs are in [Figma](…), build's tracked in [VM-527](…/VM-527).
 
 ---
 
@@ -165,15 +181,13 @@ Replace `<CHANNEL>` with the target channel name/id (or a person).
    Parse stdout as JSON { jql, fields }. Run that JQL via the jira-rest connector,
    requesting exactly those fields.
 2. Pipe the resulting issues as JSON into stdin of: python3 pm.py design-completed render
-3. The script prints zero or more blocks, each between "===MESSAGE===" and "===END===".
-   For each block:
-     a. Read the MATERIAL section; write a 3-4 line summary of what the feature is about.
-        If a product epic is linked, you may open it (and any Confluence page it references)
-        to get the real description.
-     b. Replace {{SUMMARY}} with your summary.
-     c. Post the lines between "===MESSAGE===" and "===MATERIAL" VERBATIM to <CHANNEL>.
-        Do NOT post the MATERIAL section.
-   If there are no blocks, do nothing.
+3. The script prints zero or more briefs, each between "===EPIC …===" and "===END===".
+   For each brief, write ONE Slack message and post it to <CHANNEL>:
+     - Follow the STYLE and SHAPE (casual, human — your own words, not a template).
+     - Use the FACTS exactly (never change names, dates, or links).
+     - Write the 2-3 sentence summary from the SUMMARY MATERIAL; open the product epic /
+       its Confluence page if the material is thin.
+   Post only your composed message, never the brief. If there are no briefs, do nothing.
 ```
 
 Schedule: TBD (e.g. hourly, like slot-watch). Connectors granted to the routine: **jira-rest**

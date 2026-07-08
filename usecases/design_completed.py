@@ -105,27 +105,34 @@ def extract_ticket(issue):
     }
 
 
-def _md_link(url, label):
-    return "[%s](%s)" % (label, url)
+# House style for the alert (chosen: casual teammate update, light emoji, inline links).
+STYLE_NOTE = ("Casual teammate Slack update — sound like a real person sharing good news, "
+              "not a bot. One light emoji is fine. Links inline as [text](url). Write a "
+              "2-3 sentence, plain-language summary of what the feature is and why it matters. "
+              "Drop the build/epic clause entirely if there is no product epic.")
+
+SHAPE = ("🎉 Design's wrapped on **[<title>](<design ticket url>)** — <designer> finished it on <date>.\n"
+         "<2-3 sentences: what the feature is and why it matters>\n"
+         "Designs are in [Figma](<figma url>), build's tracked in [<epic>](<epic url>).")
 
 
-def _postable_lines(t):
-    lines = ["🎨 **Design completed**",
-             "• %s — %s" % (_md_link(BROWSE % t["key"], t["key"]), t["summary"])]
-    meta = []
+def _facts_lines(t):
+    lines = ["- title: %s" % t["summary"],
+             "- design ticket url: %s" % (BROWSE % t["key"])]
     if t["designer"]:
-        meta.append("👤 %s" % t["designer"])
+        lines.append("- designer: %s" % t["designer"])
     if t["completed_on"]:
-        meta.append("📅 %s" % t["completed_on"])
-    if meta:
-        lines.append("   " + " · ".join(meta))
-    for label, url in t["figma"]:
-        lines.append("   🔗 %s" % _md_link(url, label))
-    if not t["figma"]:
-        lines.append("   🔗 _no Figma link on ticket_")
-    for pe in t["product_epics"]:
-        lines.append("   📋 Feature epic: %s" % _md_link(pe["url"], pe["key"]))
-    lines.append("   📝 {{SUMMARY}}")
+        lines.append("- completed: %s" % t["completed_on"])
+    if t["figma"]:
+        for label, url in t["figma"]:
+            lines.append("- figma: %s | %s" % (label, url))
+    else:
+        lines.append("- figma: none")
+    if t["product_epics"]:
+        for pe in t["product_epics"]:
+            lines.append("- product epic: %s | %s" % (pe["key"], pe["url"]))
+    else:
+        lines.append("- product epic: none (skip the build/epic clause)")
     return lines
 
 
@@ -135,18 +142,25 @@ def _material_lines(t):
         lines.append("Linked product epic(s):")
         for pe in t["product_epics"]:
             lines.append("- %s: %s" % (pe["key"], pe["summary"]))
-        lines.append("(If a description is thin or points to a Confluence page, open it for the real feature description.)")
     else:
         lines.append("Linked product epic(s): none — summarise from the design epic description above.")
     return lines
 
 
 def format_block(t):
-    """One epic -> a block: postable message (with {{SUMMARY}} slot) + material for it."""
+    """One epic -> a brief for Claude: STYLE + SHAPE + exact FACTS + SUMMARY MATERIAL.
+    Claude writes the human-voice message from this and posts it (no verbatim slice)."""
     return "\n".join(
-        ["===MESSAGE==="]
-        + _postable_lines(t)
-        + ["===MATERIAL (do not post — use it to write {{SUMMARY}})==="]
+        ["===EPIC %s===" % t["key"],
+         "STYLE: " + STYLE_NOTE,
+         "SHAPE (match the tone, write your own words — do not copy the placeholders):",
+         SHAPE,
+         "",
+         "FACTS (use exactly; never change names, dates, or links):"]
+        + _facts_lines(t)
+        + ["",
+           "SUMMARY MATERIAL (write the summary from this; open the product epic / its "
+           "Confluence page if it is thin):"]
         + _material_lines(t)
         + ["===END==="]
     )
@@ -158,7 +172,7 @@ def render(issues, sent_keys):
     new = [extract_ticket(i) for i in issues if i.get("key") not in sent_keys]
     if not new:
         return "", []
-    return "\n".join(format_block(t) for t in new), [t["key"] for t in new]
+    return "\n\n".join(format_block(t) for t in new), [t["key"] for t in new]
 
 
 def select_output(out, new_keys, is_first_run):
