@@ -1,25 +1,36 @@
 """Use case: design-completed.
 
-When an Ounass Product Design (OPD) ticket reaches Done, print a single Slack message
-listing the newly-completed tickets — once per ticket. The routine posts that message to
-one channel it names in its prompt (slot-watch style: stdout is the message).
+When an Ounass Product Design (OPD) ticket reaches Done, print a Slack message per
+newly-completed epic — once per ticket. Each message carries the fixed fields plus a
+3-4 line summary of *what the feature is about*, which Claude writes from the material
+the script assembles (the design epic's description + its linked product epic, and any
+Confluence page that epic references).
 
-The script owns all business logic (the JQL, the field list, dedup, formatting). Claude
-only runs the query the script emits and posts the message it prints. Two subcommands:
+The script owns everything deterministic: the JQL, the field list, dedup, the linked
+product-epic detection, the message layout, and the raw material. Claude owns only the
+prose summary (a genuinely non-deterministic, reasoning task) and the posting.
 
-    query    -> prints {"jql": ..., "fields": [...]} for Claude to run via jira-rest
-    render   -> reads the JQL result rows on stdin, prints the Slack message,
-                records the emitted keys as sent (empty output = nothing new)
+Subcommands:
+    query    -> prints {"jql", "fields"} to run via jira-rest
+    render   -> reads JQL rows on stdin, prints one block per new epic, records sent keys
 
-Field mapping (verified against OPD-3):
+Each block:
+    ===MESSAGE===
+    <postable message, with a {{SUMMARY}} slot>
+    ===MATERIAL (do not post)===
+    <description + linked product epic, for writing the summary>
+    ===END===
+Claude fills {{SUMMARY}} and posts the postable part only.
+
+Field mapping (verified against OPD-3 / VM-527):
     summary       -> summary
-    designer      -> customfield_12707  (Product Owner)
-    figma link(s) -> customfield_12714  (Design)
-    completed_on  -> customfield_13239  (Actual Design/Research Finish Date),
-                     falling back to statuscategorychangedate (went Done)
+    description   -> description                (summary material)
+    designer      -> customfield_12707          (Product Owner)
+    figma link(s) -> customfield_12714          (Design)
+    completed_on  -> customfield_13239, else statuscategorychangedate
+    product epic  -> issuelinks (linked Epics not in the OPD project)
 
-Output uses standard markdown ([label](url), **bold**) — the format the Slack connector
-renders. Slack's native <url|label> would post literally.
+Output uses standard markdown ([label](url), **bold**) — the Slack connector's format.
 """
 import json
 from datetime import datetime
@@ -32,12 +43,15 @@ BROWSE = "https://altayerdigital.atlassian.net/browse/%s"
 STATE_PATH = "state/design_completed.json"
 
 F_SUMMARY = "summary"
+F_DESCRIPTION = "description"
 F_DESIGNER = "customfield_12707"
 F_FIGMA = "customfield_12714"
 F_DESIGN_FINISH = "customfield_13239"
 F_DONE_TS = "statuscategorychangedate"
+F_LINKS = "issuelinks"
 
-QUERY_FIELDS = [F_SUMMARY, F_DESIGNER, F_FIGMA, F_DESIGN_FINISH, F_DONE_TS]
+QUERY_FIELDS = [F_SUMMARY, F_DESCRIPTION, F_DESIGNER, F_FIGMA,
+                F_DESIGN_FINISH, F_DONE_TS, F_LINKS]
 
 
 def build_query():
@@ -57,8 +71,23 @@ def _fmt_date(value):
         return ""
 
 
+def _product_epics(f):
+    """Linked issues that are Epics outside the OPD (design) project = product/feature
+    epics. Returns [{key, summary, url}] (empty if none — not every design epic has one)."""
+    out = []
+    for link in f.get(F_LINKS) or []:
+        li = link.get("outwardIssue") or link.get("inwardIssue") or {}
+        key = li.get("key")
+        lf = li.get("fields") or {}
+        itype = (lf.get("issuetype") or {}).get("name")
+        if not key or itype != "Epic" or key.startswith(PROJECT + "-"):
+            continue
+        out.append({"key": key, "summary": lf.get("summary") or "", "url": BROWSE % key})
+    return out
+
+
 def extract_ticket(issue):
-    """Normalise a raw jira-rest issue into the fields we display."""
+    """Normalise a raw jira-rest issue into display fields + summary material."""
     f = issue.get("fields", {}) or {}
     owners = f.get(F_DESIGNER) or []
     designer = ", ".join(o.get("displayName", "") for o in owners if o.get("displayName"))
@@ -68,9 +97,11 @@ def extract_ticket(issue):
     return {
         "key": issue.get("key"),
         "summary": f.get(F_SUMMARY) or "",
+        "description": f.get(F_DESCRIPTION) or "",
         "designer": designer,
         "figma": figma,
         "completed_on": completed_on,
+        "product_epics": _product_epics(f),
     }
 
 
@@ -78,8 +109,9 @@ def _md_link(url, label):
     return "[%s](%s)" % (label, url)
 
 
-def _ticket_lines(t):
-    lines = ["• %s — %s" % (_md_link(BROWSE % t["key"], t["key"]), t["summary"])]
+def _postable_lines(t):
+    lines = ["🎨 **Design completed**",
+             "• %s — %s" % (_md_link(BROWSE % t["key"], t["key"]), t["summary"])]
     meta = []
     if t["designer"]:
         meta.append("👤 %s" % t["designer"])
@@ -91,24 +123,42 @@ def _ticket_lines(t):
         lines.append("   🔗 %s" % _md_link(url, label))
     if not t["figma"]:
         lines.append("   🔗 _no Figma link on ticket_")
+    for pe in t["product_epics"]:
+        lines.append("   📋 Feature epic: %s" % _md_link(pe["url"], pe["key"]))
+    lines.append("   📝 {{SUMMARY}}")
     return lines
 
 
-def format_message(tickets):
-    """Render all tickets into one Slack message body."""
-    lines = ["🎨 **Design completed**"]
-    for t in tickets:
-        lines.extend(_ticket_lines(t))
-    return "\n".join(lines)
+def _material_lines(t):
+    lines = ["Design epic description: %s" % (t["description"].strip() or "(none)")]
+    if t["product_epics"]:
+        lines.append("Linked product epic(s):")
+        for pe in t["product_epics"]:
+            lines.append("- %s: %s" % (pe["key"], pe["summary"]))
+        lines.append("(If a description is thin or points to a Confluence page, open it for the real feature description.)")
+    else:
+        lines.append("Linked product epic(s): none — summarise from the design epic description above.")
+    return lines
+
+
+def format_block(t):
+    """One epic -> a block: postable message (with {{SUMMARY}} slot) + material for it."""
+    return "\n".join(
+        ["===MESSAGE==="]
+        + _postable_lines(t)
+        + ["===MATERIAL (do not post — use it to write {{SUMMARY}})==="]
+        + _material_lines(t)
+        + ["===END==="]
+    )
 
 
 def render(issues, sent_keys):
-    """Filter already-sent tickets and return (message string, newly-emitted keys).
-    Empty message when there is nothing new."""
+    """Filter already-sent tickets and return (blocks string, newly-emitted keys).
+    Empty string when there is nothing new."""
     new = [extract_ticket(i) for i in issues if i.get("key") not in sent_keys]
     if not new:
         return "", []
-    return format_message(new), [t["key"] for t in new]
+    return "\n".join(format_block(t) for t in new), [t["key"] for t in new]
 
 
 def select_output(out, new_keys, is_first_run):

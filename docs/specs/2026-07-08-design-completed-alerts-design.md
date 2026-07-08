@@ -75,38 +75,47 @@ python3 pm.py design-completed query
 
 python3 pm.py design-completed render         # ← JQL result rows as JSON on stdin
     → drops any ticket key already in state/design_completed.json
-    → formats the remaining tickets into ONE Slack message
+    → prints one block per new epic: a postable message with a {{SUMMARY}} slot + a
+      MATERIAL section (description + linked product epic) for Claude to write the summary
     → records the emitted keys as sent (git commit + push; fail-open like should_send_alert)
-    → prints the message (empty output = nothing new)
+    → empty output = nothing new
 ```
 
 Routing note: there is **no POD→channel mapping**. All alerts go to a single channel that
-the routine names in its prompt (slot-watch style). stdout is the whole message.
+the routine names in its prompt (slot-watch style). The script owns the fixed fields; Claude
+writes only the 3-4 line summary and posts.
 
 ### `query` output (JQL, not SQL)
 
 ```json
 {
   "jql": "project = OPD AND status = Done AND statusCategoryChangedDate >= -7d ORDER BY statusCategoryChangedDate DESC",
-  "fields": ["summary", "customfield_12707",
-             "customfield_12714", "customfield_13239", "statuscategorychangedate"]
+  "fields": ["summary", "description", "customfield_12707", "customfield_12714",
+             "customfield_13239", "statuscategorychangedate", "issuelinks"]
 }
 ```
 
 - **7-day recency guard** bounds the working set.
 - Field list is owned by the script, so the prompt never names a field id.
 
-### `render` output (channel-tagged blocks)
+### `render` output (one block per new epic)
 
-The whole stdout IS the message; the routine posts it verbatim to one channel. Uses
-**standard markdown** (`[label](url)`, `**bold**`) — the format the Slack connector
-renders; Slack's native `<url|label>` would post literally.
+Standard markdown (`[label](url)`, `**bold**`) — the Slack connector's format. Claude fills
+`{{SUMMARY}}` and posts the lines above `===MATERIAL` only.
 
 ```
+===MESSAGE===
 🎨 **Design completed**
 • [OPD-3](https://altayerdigital.atlassian.net/browse/OPD-3) — Search-Integrated Dynamic Edit Pages
    👤 Dawid Tomczyk · 📅 07 Jul 2026
    🔗 [VM platform - Phase 4 - Automated edit pages](https://www.figma.com/file/ZMG8YzYW96PCzvwZSZHoMp?node-id=4185%3A18730)
+   📋 Feature epic: [VM-527](https://altayerdigital.atlassian.net/browse/VM-527)
+   📝 {{SUMMARY}}
+===MATERIAL (do not post — use it to write {{SUMMARY}})===
+Design epic description: New feature will allow merchandisers to create trend edit pages…
+Linked product epic(s):
+- VM-527: [pod_vm] Search-Integrated Dynamic Edit Pages
+===END===
 ```
 
 ---
@@ -116,9 +125,11 @@ renders; Slack's native `<url|label>` would post literally.
 | Display field | Source | Notes |
 |---|---|---|
 | Summary | `summary` | |
+| Description | `description` | Summary material (may be a Confluence smartlink) |
 | Figma link(s) | `customfield_12714` ("Design") | Array of `{displayName, url}`; render all links |
 | Designer | `customfield_12707` ("Product Owner") | Array of users; join display names |
 | Completed-on | `customfield_13239` ("Actual Design/Research Finish Date") | If null → fall back to `statuscategorychangedate` (when it entered Done) |
+| Product epic(s) | `issuelinks` | Linked Epics **not** in the OPD project (e.g. VM-527). May be absent |
 | Ticket key | issue `key` | Dedup key + `browse/` link |
 
 Cloud site: `altayerdigital.atlassian.net` (cloudId `ca815d59-7877-4488-8456-8511e1ade88a`),
@@ -154,11 +165,19 @@ Replace `<CHANNEL>` with the target channel name/id (or a person).
    Parse stdout as JSON { jql, fields }. Run that JQL via the jira-rest connector,
    requesting exactly those fields.
 2. Pipe the resulting issues as JSON into stdin of: python3 pm.py design-completed render
-3. If the script prints anything, post it VERBATIM to <CHANNEL>. If it prints nothing, do nothing.
+3. The script prints zero or more blocks, each between "===MESSAGE===" and "===END===".
+   For each block:
+     a. Read the MATERIAL section; write a 3-4 line summary of what the feature is about.
+        If a product epic is linked, you may open it (and any Confluence page it references)
+        to get the real description.
+     b. Replace {{SUMMARY}} with your summary.
+     c. Post the lines between "===MESSAGE===" and "===MATERIAL" VERBATIM to <CHANNEL>.
+        Do NOT post the MATERIAL section.
+   If there are no blocks, do nothing.
 ```
 
 Schedule: TBD (e.g. hourly, like slot-watch). Connectors granted to the routine: **jira-rest**
-(or jiraanalysis) + **Slack**.
+(or jiraanalysis) + **Slack** + **Confluence** (to follow linked wiki pages).
 
 ---
 
@@ -166,9 +185,11 @@ Schedule: TBD (e.g. hourly, like slot-watch). Connectors granted to the routine:
 
 - Designer = Product Owner (`customfield_12707`).
 - Completed-on = `customfield_13239`, falling back to `statuscategorychangedate`.
-- Scope = any OPD issue at Done, 7-day recency guard; issue-type restriction deferrable to config.
-- Single connector: jira-rest only; MySQL query dropped.
-- Dedup = git state file, recorded at `render`, fail-open (2 script calls, no separate commit step).
+- Scope = any OPD issue at Done, 7-day recency guard; issue-type restriction deferrable later.
+- Single data source: jira-rest (MySQL query dropped); Confluence used only to enrich summaries.
+- Dedup = git state file, recorded at `render`, fail-open.
+- Feature summary is Claude-written (3-4 lines) via a `{{SUMMARY}}` slot the script emits;
+  fixed fields + linked product-epic link stay script-owned. Product epic may be absent.
 
 ---
 
