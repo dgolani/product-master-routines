@@ -81,14 +81,16 @@ def extract_ticket(issue):
     }
 
 
-def _slack_link(url, label):
-    return "<%s|%s>" % (url, label)
+def _md_link(url, label):
+    """Standard-markdown link — the format the Slack connector expects (it converts
+    [label](url) into a Slack hyperlink). Slack's native <url|label> would post literally."""
+    return "[%s](%s)" % (label, url)
 
 
 def _ticket_lines(t):
-    """One ticket -> a list of Slack mrkdwn lines."""
+    """One ticket -> a list of standard-markdown lines."""
     key = t["key"]
-    lines = ["• %s — %s" % (_slack_link(BROWSE % key, key), t["summary"])]
+    lines = ["• %s — %s" % (_md_link(BROWSE % key, key), t["summary"])]
     meta = []
     if t["designer"]:
         meta.append("👤 %s" % t["designer"])
@@ -97,7 +99,7 @@ def _ticket_lines(t):
     if meta:
         lines.append("   " + " · ".join(meta))
     for label, url in t["figma"]:
-        lines.append("   🔗 %s" % _slack_link(url, label))
+        lines.append("   🔗 %s" % _md_link(url, label))
     if not t["figma"]:
         lines.append("   🔗 _no Figma link on ticket_")
     return lines
@@ -105,7 +107,7 @@ def _ticket_lines(t):
 
 def format_body(pod, tickets):
     """Render a channel's block body: a POD header + each ticket."""
-    header = "🎨 *Design completed* — %s" % (pod if pod else "_no POD set_")
+    header = "🎨 **Design completed** — %s" % (pod if pod else "_no POD set_")
     lines = [header]
     for t in tickets:
         lines.extend(_ticket_lines(t))

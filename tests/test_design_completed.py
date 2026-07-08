@@ -85,14 +85,14 @@ class TestFormatBody(unittest.TestCase):
         self.assertIn("Search-Integrated Dynamic Edit Pages", body)
         self.assertIn("Dawid Tomczyk", body)
         self.assertIn("07 Jul 2026", body)
-        # Figma rendered as a Slack link <url|label>
-        self.assertIn("<https://www.figma.com/file/ZMG8YzYW96PCzvwZSZHoMp?node-id=4185%3A18730|"
-                      "VM platform - Phase 4 - Automated edit pages>", body)
+        # Figma rendered as a standard-markdown link [label](url) (the Slack connector's format)
+        self.assertIn("[VM platform - Phase 4 - Automated edit pages]"
+                      "(https://www.figma.com/file/ZMG8YzYW96PCzvwZSZHoMp?node-id=4185%3A18730)", body)
 
     def test_ticket_key_links_to_jira(self):
         t = dc.extract_ticket(make_issue())
         body = dc.format_body("pod_vm", [t])
-        self.assertIn("<https://altayerdigital.atlassian.net/browse/OPD-3|OPD-3>", body)
+        self.assertIn("[OPD-3](https://altayerdigital.atlassian.net/browse/OPD-3)", body)
 
     def test_no_pod_header_is_readable(self):
         t = dc.extract_ticket(make_issue(fields={"customfield_13434": None}))
