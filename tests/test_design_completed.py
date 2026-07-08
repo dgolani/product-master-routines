@@ -113,23 +113,23 @@ class TestChannelFor(unittest.TestCase):
 
 class TestRender(unittest.TestCase):
     def test_new_ticket_emits_block_to_fallback_and_reports_key(self):
-        out, new_keys = dc.render([make_issue()], set(), {}, "DINESH_DM")
-        self.assertIn("==channel=DINESH_DM==", out)
+        out, new_keys = dc.render([make_issue()], set(), {}, "D04LBFPJEMT")
+        self.assertIn("==channel=D04LBFPJEMT==", out)
         self.assertIn("OPD-3", out)
         self.assertEqual(new_keys, ["OPD-3"])
 
     def test_mapped_pod_routes_to_its_channel(self):
-        out, _ = dc.render([make_issue()], set(), {"pod_vm": "C999"}, "DINESH_DM")
+        out, _ = dc.render([make_issue()], set(), {"pod_vm": "C999"}, "D04LBFPJEMT")
         self.assertIn("==channel=C999==", out)
 
     def test_already_sent_ticket_is_skipped(self):
-        out, new_keys = dc.render([make_issue()], {"OPD-3"}, {}, "DINESH_DM")
+        out, new_keys = dc.render([make_issue()], {"OPD-3"}, {}, "D04LBFPJEMT")
         self.assertEqual(out, "")
         self.assertEqual(new_keys, [])
 
     def test_same_pod_tickets_share_one_block(self):
         issues = [make_issue(key="OPD-3"), make_issue(key="OPD-9")]
-        out, new_keys = dc.render(issues, set(), {"pod_vm": "C999"}, "DINESH_DM")
+        out, new_keys = dc.render(issues, set(), {"pod_vm": "C999"}, "D04LBFPJEMT")
         self.assertEqual(out.count("==channel="), 1)
         self.assertIn("OPD-3", out)
         self.assertIn("OPD-9", out)
@@ -181,7 +181,7 @@ class TestRun(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             state = os.path.join(d, "s.json")  # missing -> first run
             out = dc.run("render", json.dumps([make_issue()]),
-                         state_path=state, pod_channels={}, fallback="DINESH_DM")
+                         state_path=state, pod_channels={}, fallback="D04LBFPJEMT")
             self.assertEqual(out, "")
 
     def test_render_normal_run_emits_block(self):
@@ -191,8 +191,8 @@ class TestRun(unittest.TestCase):
             with open(state, "w") as f:
                 json.dump({"sent": []}, f)  # exists -> not first run
             out = dc.run("render", json.dumps([make_issue()]),
-                         state_path=state, pod_channels={}, fallback="DINESH_DM")
-            self.assertIn("==channel=DINESH_DM==", out)
+                         state_path=state, pod_channels={}, fallback="D04LBFPJEMT")
+            self.assertIn("==channel=D04LBFPJEMT==", out)
             self.assertIn("OPD-3", out)
 
     def test_render_skips_already_sent(self):
@@ -202,7 +202,7 @@ class TestRun(unittest.TestCase):
             with open(state, "w") as f:
                 json.dump({"sent": ["OPD-3"]}, f)
             out = dc.run("render", json.dumps([make_issue()]),
-                         state_path=state, pod_channels={}, fallback="DINESH_DM")
+                         state_path=state, pod_channels={}, fallback="D04LBFPJEMT")
             self.assertEqual(out, "")
 
 

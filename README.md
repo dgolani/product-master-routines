@@ -50,8 +50,9 @@ python3 pm.py design-completed render     # reads JQL rows (JSON) on stdin, prin
 
 - **Dedup:** `state/design_completed.json` (git-committed), fail-open. At most one alert per key.
 - **Cold-start:** first run with no state file records all current keys silently (no backlog blast).
-- **Routing:** `config.py` maps POD -> channel; unmapped/blank POD -> `FALLBACK_CHANNEL`
-  (currently `DINESH_DM`, a DM to Dinesh during the test phase).
+- **Routing:** `config.py` maps POD -> Slack channel; unmapped/blank POD -> `FALLBACK_CHANNEL`
+  (currently Dinesh's DM `D04LBFPJEMT` during the test phase). Every value is a plain Slack
+  target the prompt posts to directly — no special-casing.
 
 ### Routine setup
 
@@ -62,10 +63,9 @@ python3 pm.py design-completed render     # reads JQL rows (JSON) on stdin, prin
 1. Run from repo root: python3 pm.py design-completed query
    Parse stdout as JSON {jql, fields}. Run that JQL via the jira connector, requesting those fields.
 2. Pipe the resulting issues as JSON into: python3 pm.py design-completed render
-3. The script prints zero or more blocks, each starting with a line "==channel=XXXX==".
-   Post the text below that line VERBATIM to that Slack channel.
-   If the channel is "DINESH_DM", send it as a direct message to Dinesh Golani.
-   If there are no blocks, do nothing.
+3. The script prints zero or more blocks. Each block starts with a line "==channel=<target>=="
+   followed by a body. For each block, post the body text VERBATIM to the Slack channel
+   identified by <target> (a channel id, channel name, or DM id). If there are no blocks, do nothing.
 ```
 
 ## Tests

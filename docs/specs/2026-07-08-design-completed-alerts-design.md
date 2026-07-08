@@ -100,13 +100,15 @@ python3 pm.py design-completed render         # ← JQL result rows as JSON on s
 
 Claude reads the `==channel=...==` header and posts the body below it verbatim.
 
+Bodies use **standard markdown** (`[label](url)`, `**bold**`) — the format the Slack
+connector renders; Slack's native `<url|label>` would post literally.
+
 ```
-==channel=DINESH_DM==
-🎨 Design completed — pod_vm
-• OPD-3 — Search-Integrated Dynamic Edit Pages
-   Designer: Dawid Tomczyk · Completed: 07 Jul 2026
-   🔗 Figma — VM platform - Phase 4 - Automated edit pages
-   https://www.figma.com/file/ZMG8YzYW96PCzvwZSZHoMp?node-id=4185%3A18730
+==channel=D04LBFPJEMT==
+🎨 **Design completed** — pod_vm
+• [OPD-3](https://altayerdigital.atlassian.net/browse/OPD-3) — Search-Integrated Dynamic Edit Pages
+   👤 Dawid Tomczyk · 📅 07 Jul 2026
+   🔗 [VM platform - Phase 4 - Automated edit pages](https://www.figma.com/file/ZMG8YzYW96PCzvwZSZHoMp?node-id=4185%3A18730)
 ```
 
 ---
@@ -142,18 +144,19 @@ project **OPD** = "Ounass Product Design" (id 13168).
 ## 7. Routing config (`config.py`)
 
 ```python
-# POD (from customfield_13434) → Slack channel id.
+# POD (from customfield_13434) → Slack channel (id or name).
 POD_CHANNELS = {
     # "pod_vm": "C0XXXX",
-    # "pod_search": "C0YYYY",
+    # "pod_search": "#design-search",
 }
-# Unmapped or blank POD goes here.
-FALLBACK_CHANNEL = "DINESH_DM"   # test phase: everything DMs Dinesh Golani
+# Unmapped or blank POD goes here. Test phase: Dinesh's DM.
+FALLBACK_CHANNEL = "D04LBFPJEMT"
 ```
 
-**Test phase:** `POD_CHANNELS` is empty, so every alert routes to `FALLBACK_CHANNEL`, which the
-prompt resolves to a Slack DM to Dinesh Golani. When ready, Dinesh fills `POD_CHANNELS` with real
-channel ids — no other change needed.
+Every value is a plain Slack target the prompt posts to directly (channel id, channel name, or
+DM id) — no special-casing. **Test phase:** `POD_CHANNELS` is empty, so every alert routes to
+`FALLBACK_CHANNEL` (Dinesh's DM). In production, fill `POD_CHANNELS` and repoint `FALLBACK_CHANNEL`
+at a real channel — no other change needed.
 
 ---
 
@@ -164,10 +167,9 @@ channel ids — no other change needed.
    Parse its stdout as JSON: { jql, fields }. Run that JQL via the jira connector,
    requesting exactly those fields.
 2. Pipe the resulting issues as JSON into: python3 pm.py design-completed render
-3. The script prints zero or more blocks, each starting with a line "==channel=XXXX==".
-   For each block, post the text below that line VERBATIM to that Slack channel.
-   If the channel value is "DINESH_DM", send it as a direct message to Dinesh Golani.
-   If there are no blocks, do nothing.
+3. The script prints zero or more blocks. Each block starts with a line "==channel=<target>=="
+   followed by a body. For each block, post the body text VERBATIM to the Slack channel
+   identified by <target> (a channel id, channel name, or DM id). If there are no blocks, do nothing.
 ```
 
 Schedule: TBD (e.g. hourly, like slot-watch). Connectors granted to the routine: **jira-rest**
