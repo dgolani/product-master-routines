@@ -86,6 +86,27 @@ def _product_epics(f):
     return out
 
 
+def _adf_to_text(node):
+    """Flatten an Atlassian Document Format value (dict/list from the v3 API's
+    `description` field) into plain text. Text runs are concatenated; inlineCard/link
+    URLs are appended in parens so links in the description aren't silently dropped."""
+    if node is None:
+        return ""
+    if isinstance(node, str):
+        return node
+    if isinstance(node, list):
+        return "".join(_adf_to_text(n) for n in node)
+    if isinstance(node, dict):
+        ntype = node.get("type")
+        if ntype == "text":
+            return node.get("text") or ""
+        if ntype in ("inlineCard", "blockCard"):
+            url = (node.get("attrs") or {}).get("url")
+            return "(%s)" % url if url else ""
+        return _adf_to_text(node.get("content"))
+    return ""
+
+
 def extract_ticket(issue):
     """Normalise a raw jira-rest issue into display fields + summary material."""
     f = issue.get("fields", {}) or {}
@@ -97,7 +118,7 @@ def extract_ticket(issue):
     return {
         "key": issue.get("key"),
         "summary": f.get(F_SUMMARY) or "",
-        "description": f.get(F_DESCRIPTION) or "",
+        "description": _adf_to_text(f.get(F_DESCRIPTION)).strip(),
         "designer": designer,
         "figma": figma,
         "completed_on": completed_on,
