@@ -51,6 +51,25 @@ class TestExtractTicket(unittest.TestCase):
         self.assertEqual(t["designer"], "Dawid Tomczyk")
         self.assertIn("trend edit pages", t["description"])
 
+    def test_adf_description_is_flattened_to_text(self):
+        adf = {"type": "doc", "version": 1, "content": [
+            {"type": "paragraph", "content": [
+                {"type": "inlineCard", "attrs": {"url": "https://www.figma.com/design/abc?node-id=1"}},
+                {"type": "text", "text": " "},
+            ]},
+        ]}
+        t = dc.extract_ticket(make_issue(fields={"description": adf}))
+        self.assertIn("https://www.figma.com/design/abc?node-id=1", t["description"])
+
+    def test_empty_adf_description_is_empty_string(self):
+        adf = {"type": "doc", "version": 1, "content": [{"type": "paragraph", "attrs": {}}]}
+        t = dc.extract_ticket(make_issue(fields={"description": adf}))
+        self.assertEqual(t["description"], "")
+
+    def test_null_description_is_empty_string(self):
+        t = dc.extract_ticket(make_issue(fields={"description": None}))
+        self.assertEqual(t["description"], "")
+
     def test_completed_on_falls_back_to_done_timestamp(self):
         self.assertEqual(dc.extract_ticket(make_issue())["completed_on"], "07 Jul 2026")
 

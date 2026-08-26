@@ -71,6 +71,26 @@ def _fmt_date(value):
         return ""
 
 
+def _adf_to_text(node):
+    """Flatten a Jira API v3 Atlassian Document Format description (or a plain string,
+    or None) into plain text, keeping inline/block card URLs."""
+    if not node:
+        return ""
+    if isinstance(node, str):
+        return node
+    if isinstance(node, list):
+        return "".join(_adf_to_text(n) for n in node)
+    if isinstance(node, dict):
+        node_type = node.get("type")
+        if node_type == "text":
+            return node.get("text", "")
+        if node_type in ("inlineCard", "blockCard", "embedCard"):
+            return (node.get("attrs") or {}).get("url", "")
+        text = _adf_to_text(node.get("content") or [])
+        return text + "\n" if node_type == "paragraph" else text
+    return ""
+
+
 def _product_epics(f):
     """Linked issues that are Epics outside the OPD (design) project = product/feature
     epics. Returns [{key, summary, url}] (empty if none — not every design epic has one)."""
@@ -97,7 +117,7 @@ def extract_ticket(issue):
     return {
         "key": issue.get("key"),
         "summary": f.get(F_SUMMARY) or "",
-        "description": f.get(F_DESCRIPTION) or "",
+        "description": _adf_to_text(f.get(F_DESCRIPTION)).strip(),
         "designer": designer,
         "figma": figma,
         "completed_on": completed_on,
